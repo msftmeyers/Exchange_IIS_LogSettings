@@ -21,14 +21,14 @@
 .PARAMETER MaxSize
     <optional> Rollover Method MaxSize
 
-.PARAMETER RolloverSizeGB
-    <optional> MaxSize Rollover threshold in GB
+.PARAMETER RolloverSizeMB
+    <optional> MaxSize Rollover threshold in MB
 
 .PARAMETER UTF8
     <optional> Log Format UTF8
 
 .EXAMPLE
-    .\iis_logging.ps1 [-Set] [-Compare] [-Directory <iis_logpath>] [-Daily/-MaxSize] [-RolloverSize <GB>] [-UTF8]
+    .\iis_logging.ps1 [-Set] [-Compare] [-Directory <iis_logpath>] [-Daily/-MaxSize] [-RolloverSizeMB <MB>] [-UTF8]
 
 .NOTES
     Steffen Meyer
@@ -167,7 +167,6 @@ foreach ($Server in $Servers)
 
         [PSCustomObject]$Result
     }
-
     
     #if at least one of the expected options isn't fulfilled, add to object
     if (($PSCmdlet.ParameterSetName -eq 'ExportAll') -or ((@($RemoteResult.DefaultWebSiteDirectory,$RemoteResult.ExchangeBackEndDirectory) -notlike $Directory) -or (@($RemoteResult.DefaultWebSiteRolloverMethod,$RemoteResult.ExchangeBackEndRolloverMethod) -notcontains $Period) -or (($Period -eq 'MaxSize') -and (@($RemoteResult.DefaultWebSiteRolloverSize,$RemoteResult.ExchangeBackEndRolloverSize) -ne $RolloverSizeBytes)) -or ($UTF8 -and !($RemoteResult.Encoding.Value)) -or (!($UTF8) -and $RemoteResult.Encoding.Value)))

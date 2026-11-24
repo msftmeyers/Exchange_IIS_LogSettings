@@ -15,20 +15,23 @@
 .PARAMETER Directory
     <optional> Log Directory
 
-.PARAMETER Daily
-    <optional> Rollover Method Daily
+.PARAMETER ScheduleRollover
+    <optional> Rollover Method Schedule
 
-.PARAMETER MaxSize
+.PARAMETER MaxSizeRollover
     <optional> Rollover Method MaxSize
 
+.PARAMETER Schedule
+    <optional> Schedule Hourly,Daily,Weekly,Monthly
+        
 .PARAMETER RolloverSizeMB
     <optional> MaxSize Rollover threshold in MB
 
-.PARAMETER UTF8
-    <optional> Log Format UTF8
+.PARAMETER Encoding
+    <optional> Log Format UTF8/ANSI
 
 .EXAMPLE
-    .\iis_logging.ps1 [-Set] [-Compare] [-Directory <iis_logpath>] [-Daily/-MaxSize] [-RolloverSizeMB <MB>] [-UTF8]
+    .\iis_logsettings.ps1 [-Set] [-Compare] [-Directory <iis_logpath>] [-ScheduleRollover] [-MaxSizeRollover] [-Schedule <Daily/Hourly/Weekly/Monthly>][-RolloverSize <MB>] [-Encoding <UTF8/ANSI>]
 
 .NOTES
     Steffen Meyer
@@ -38,61 +41,63 @@
     V1.0 - 27.10.2026 - Initial Version
     V1.1 - 28.10.2026 - Added "Set"
     V2.0 - 05.11.2026 - Take into account of Logging configuration of IIS root and all websites, rolloversize param changed from GB to MB
+    V2.1 - 10.11.2026 - some issues corrected
+    V2.2 - 23.11.2026 - corrected some issues, added Hourly,Daily,Weekly,Monthly rollover methods
+    V2.5 - 24.11.2026 - reduced to only siteDefaults, Default Web Site, Exchange Back End
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'ExportAll')]
 Param(
-     [Parameter(Mandatory,Position=0,ParameterSetName = 'CompareDaily',HelpMessage='Create list of misconfigured server(s)')]
+     [Parameter(Mandatory,Position=0,ParameterSetName = 'CompareSchedule',HelpMessage='Create list of misconfigured server(s)')]
      [Parameter(Mandatory,Position=0,ParameterSetName = 'CompareMaxSize')]
      [Switch]$Compare,
-     [Parameter(Mandatory,Position=0,ParameterSetName = 'SetDaily',HelpMessage='Set expected settings to list of misconfigured server(s)')]
+     [Parameter(Mandatory,Position=0,ParameterSetName = 'SetSchedule',HelpMessage='Set expected settings to list of misconfigured server(s)')]
      [Parameter(Mandatory,Position=0,ParameterSetName = 'SetMaxSize')]
      [Switch]$Set,
-     [Parameter(Mandatory,Position=1,ParameterSetName = 'CompareDaily',HelpMessage='IIS LogFile Directory')]
+     [Parameter(Mandatory,Position=1,ParameterSetName = 'CompareSchedule',HelpMessage='IIS LogFile Directory')]
      [Parameter(Mandatory,Position=1,ParameterSetName = 'CompareMaxSize')]
-     [Parameter(Mandatory,Position=1,ParameterSetName = 'SetDaily')]
+     [Parameter(Mandatory,Position=1,ParameterSetName = 'SetSchedule')]
      [Parameter(Mandatory,Position=1,ParameterSetName = 'SetMaxSize')]
      [String]$Directory,
-     [Parameter(Mandatory,Position=2,ParameterSetName = 'CompareDaily',HelpMessage='RolloverMethod Daily')]
-     [Parameter(Mandatory,Position=2,ParameterSetName = 'SetDaily')]
-     [Switch]$Daily,
+     [Parameter(Mandatory,Position=2,ParameterSetName = 'CompareSchedule',HelpMessage='RolloverMethod Schedule')]
+     [Parameter(Mandatory,Position=2,ParameterSetName = 'SetSchedule')]
+     [Switch]$ScheduleRollover,
      [Parameter(Mandatory,Position=2,ParameterSetName = 'CompareMaxSize',HelpMessage='RolloverMethod MaxSize')]
      [Parameter(Mandatory,Position=2,ParameterSetName = 'SetMaxSize')]
-     [Switch]$MaxSize,
+     [Switch]$MaxSizeRollover,
+     [Parameter(Mandatory,Position=3,ParameterSetName = 'CompareSchedule',HelpMessage='Rollover timeframe')]
+     [Parameter(Mandatory,Position=3,ParameterSetName = 'SetSchedule')]
+     [ValidateSet('Hourly','Daily','Weekly','Monthly')]
+     [String]$Schedule = 'Daily',
      [Parameter(Mandatory,Position=3,ParameterSetName = 'CompareMaxSize',HelpMessage='RolloverSize in MB')]
      [Parameter(Mandatory,Position=3,ParameterSetName = 'SetMaxSize')]
-     [int]$RolloverSizeMB,
-     [Parameter(Mandatory=$false,Position=4,ParameterSetName = 'CompareDaily',HelpMessage='Encoding UTF8')]
+     [ValidateRange(1,4095)]
+     [long]$RolloverSizeMB,
+     [Parameter(Mandatory=$false,Position=4,ParameterSetName = 'CompareSchedule',HelpMessage='Encoding UTF8/ANSI')]
      [Parameter(Mandatory=$false,Position=4,ParameterSetName = 'CompareMaxSize')]
-     [Parameter(Mandatory=$false,Position=4,ParameterSetName = 'SetDaily')]
+     [Parameter(Mandatory=$false,Position=4,ParameterSetName = 'SetSchedule')]
      [Parameter(Mandatory=$false,Position=4,ParameterSetName = 'SetMaxSize')]
-     [Switch]$UTF8
+     [ValidateSet('UTF8','ANSI')]
+     [String]$Encoding = 'UTF8'
      )
 
-$version = "V2.0_05.11.2026"
-
+$version = "V2.5_24.11.2026"
 $now = Get-Date
-
-#START SCRIPT
-try
-{
-    $ScriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path -ErrorAction Stop
-}
-catch
-{
-    Write-Host "`nDo not forget to save the script!" -ForegroundColor Red
-}
 
 Write-Host "`nScript version: $version"
 Write-Host   "Script started: $($now.tostring("dd.MM.yyyy HH:mm:ss"))"
 
+$ScriptPath = $PSScriptRoot
+
 #Check if Exchange SnapIn is available and load it
-if (!(Get-PSSession).ConfigurationName -eq "Microsoft.Exchange")
+$SnapIn = "Microsoft.Exchange.Management.PowerShell.SnapIn"
+
+if (!(Get-PSSnapin -Name $SnapIn -ErrorAction SilentlyContinue))
 {
-    if ((Get-PSSnapin -Registered).name -contains "Microsoft.Exchange.Management.PowerShell.SnapIn")
+    if (Get-PSSnapin -Name $SnapIn -Registered -ErrorAction SilentlyContinue)
     {
         Write-Host "`nLoading the Exchange Powershell SnapIn..." -ForegroundColor Yellow
-        Add-PSSnapin Microsoft.Exchange.Management.PowerShell.SnapIn -ErrorAction SilentlyContinue
+        Add-PSSnapin $SnapIn -ErrorAction SilentlyContinue
         . $env:ExchangeInstallPath\bin\RemoteExchange.ps1
         Connect-ExchangeServer -auto -AllowClobber
     }
@@ -104,21 +109,27 @@ if (!(Get-PSSession).ConfigurationName -eq "Microsoft.Exchange")
 }
 
 #Detect, where the script is executed
-if (!(Get-ExchangeServer -Identity $env:COMPUTERNAME -ErrorAction SilentlyContinue))
+if (!(Get-ExchangeServer -Identity $env:COMPUTERNAME -ErrorAction SilentlyContinue).serverrole -eq "Mailbox")
 {
     Write-Host "`nATTENTION: Script is executed on a non-Exchangeserver..." -ForegroundColor Cyan
 }
 
+#START SCRIPT
+
 #Create list of servers
 $Servers = Get-ExchangeServer | where ServerRole -like "Mailbox" | sort name 
 
-if ($Daily.IsPresent)
+if ($ScheduleRollover.IsPresent)
 {
-    $Period = 'Daily'
+    $RolloverMethod = $Schedule
 }
-elseif ($MaxSize.IsPresent)
+else
 {
-    $Period = 'MaxSize'
+    $RolloverMethod = 'MaxSize'
+}
+
+if ($MaxSizeRollover.IsPresent)
+{
     [int64]$RolloverSizeBytes = $RolloverSizeMB * 1MB
 }
 
@@ -139,8 +150,8 @@ foreach ($Server in $Servers)
 
         $Result = [ordered]@{}
         
-        $Websites = @('siteDefaults') + @(Get-Website | Select-Object -ExpandProperty Name)
-        
+        $Websites = @('siteDefaults','Default Web Site','Exchange Back End')
+
         foreach ($website in $Websites)
         {
             if ($website -eq 'siteDefaults')
@@ -163,13 +174,25 @@ foreach ($Server in $Servers)
 
         }
         #global log encoding setting
-        $Result["Encoding"] = Get-WebConfigurationProperty -PSPath 'MACHINE/WEBROOT/APPHOST' -Filter 'system.applicationHost/log' -Name 'logInUTF8'
+        $Encoding = Get-WebConfigurationProperty -PSPath 'MACHINE/WEBROOT/APPHOST' -Filter 'system.applicationHost/log' -Name 'logInUTF8'
+        $ActualUTF8 = $Encoding.value
+
+        if ($null -eq $ActualUTF8 -or $ActualUTF8 -isnot [bool])
+        {
+            Throw "Unexpected datatype for logInUTF8: $(if ($null -eq $ActualUTF8) { 'NULL' } else { $ActualUTF8.GetType().FullName })"
+        }
+
+        $Result["Encoding"] = $ActualUTF8
 
         [PSCustomObject]$Result
     }
-    
+
     #if at least one of the expected options isn't fulfilled, add to object
-    if (($PSCmdlet.ParameterSetName -eq 'ExportAll') -or ((@($RemoteResult.DefaultWebSiteDirectory,$RemoteResult.ExchangeBackEndDirectory) -notlike $Directory) -or (@($RemoteResult.DefaultWebSiteRolloverMethod,$RemoteResult.ExchangeBackEndRolloverMethod) -notcontains $Period) -or (($Period -eq 'MaxSize') -and (@($RemoteResult.DefaultWebSiteRolloverSize,$RemoteResult.ExchangeBackEndRolloverSize) -ne $RolloverSizeBytes)) -or ($UTF8 -and !($RemoteResult.Encoding.Value)) -or (!($UTF8) -and $RemoteResult.Encoding.Value)))
+    if (($PSCmdlet.ParameterSetName -eq 'ExportAll') -or 
+       ((@($RemoteResult.DefaultWebSiteDirectory,$RemoteResult.ExchangeBackEndDirectory) -notlike $Directory) -or 
+       (@($RemoteResult.DefaultWebSiteRolloverMethod,$RemoteResult.ExchangeBackEndRolloverMethod) -ne $RolloverMethod) -or 
+       (($RolloverMethod -eq 'MaxSize') -and (@($RemoteResult.DefaultWebSiteRolloverSize,$RemoteResult.ExchangeBackEndRolloverSize) -ne $RolloverSizeBytes)) -or 
+       ($Encoding -eq 'UTF8' -and !($RemoteResult.Encoding)) -or ($Encoding -eq 'ANSI' -and $RemoteResult.Encoding)))
     {
         $Results += [PSCustomObject]@{
             Server   = $Server
@@ -185,9 +208,8 @@ foreach ($Server in $Servers)
             ExchangeBackEndLogFormat = $RemoteResult.ExchangeBackEndLogFormat
             ExchangeBackEndRollOverMethod = $RemoteResult.ExchangeBackEndRolloverMethod
             ExchangeBackEndRollOverSize = $RemoteResult.ExchangeBackEndRolloverSize
-            Encoding = if ($RemoteResult.Encoding.Value) { 'UTF-8' } else { 'ANSI' }
+            Encoding = if ($RemoteResult.Encoding) { 'UTF-8' } else { 'ANSI' }
         }
-    
     }
 }
 Write-Progress -Activity "Getting IIS Logging Configuration is in progress..." -Completed
@@ -197,7 +219,7 @@ if ($Results)
 {
     #$Results | Format-Table -Property @{n="Server";e={$_.Server};Alignment='Left'},@{n="RootDirectory";e={$_.RootDirectory};Alignment='Left'},@{n="RootRollOverMethod";e={$_.RootRollOverMethod};Alignment='Left'},@{n="RootRollOverSize";e={$_.RootRollOverSize};Alignment='Left'},@{n="DefaultWebSiteDirectory";e={$_.DefaultWebSiteDirectory};Alignment='Left'},@{n="DefaultWebSiteRollOverMethod";e={$_.DefaultWebSiteRollOverMethod};Alignment='Left'},@{n="DefaultWebSiteRollOverSize";e={$_.DefaultWebSiteRollOverSize};Alignment='Left'},@{n="ExchangeBackEndDirectory";e={$_.ExchangeBackEndDirectory};Alignment='Left' },@{n="ExchangeBackEndRollOverMethod";e={$_.ExchangeBackEndRollOverMethod};Alignment='Left'},@{n="ExchangeBackEndRollOverSize";e={$_.ExchangeBackEndRollOverSize};Alignment='Left'},@{n="Encoding";e={$_.Encoding};Alignment='Left'} -AutoSize
     $Results | Format-Table -Property @{n="Server";e={$_.Server};Alignment='Left'},@{n="DefaultWebSiteDirectory";e={$_.DefaultWebSiteDirectory};Alignment='Left'},@{n="DefaultWebSiteRollOverMethod";e={$_.DefaultWebSiteRollOverMethod};Alignment='Left'},@{n="DefaultWebSiteRollOverSize";e={$_.DefaultWebSiteRollOverSize};Alignment='Left'},@{n="ExchangeBackEndDirectory";e={$_.ExchangeBackEndDirectory};Alignment='Left' },@{n="ExchangeBackEndRollOverMethod";e={$_.ExchangeBackEndRollOverMethod};Alignment='Left'},@{n="ExchangeBackEndRollOverSize";e={$_.ExchangeBackEndRollOverSize};Alignment='Left'},@{n="Encoding";e={$_.Encoding};Alignment='Left'} -AutoSize
-    $Results | Export-Csv -Path "$($ScriptPath)\iis_logsettings.csv" -Delimiter ";" -NoTypeInformation -Encoding UTF8
+    $Results | Export-Csv -Path "$($ScriptPath)\iis_logsettings_$($now.tostring("yyyy_MM_dd-HH_mm_ss")).csv" -Delimiter ";" -NoTypeInformation -Encoding UTF8
 }
 else
 {
@@ -232,8 +254,8 @@ if ($Set -and $Results)
             
                 $Result = [ordered]@{}
 
-                $Websites = @('siteDefaults') + @(Get-Website | Select-Object -ExpandProperty Name)
-        
+                $Websites = @('siteDefaults','Default Web Site','Exchange Back End')
+
                 foreach ($website in $Websites)
                 {
                     if ($website -eq 'siteDefaults')
@@ -256,19 +278,19 @@ if ($Set -and $Results)
                     {
                         $Result["${Prefix}Directory"] = "Failure"
                     }
-                    if ($using:Daily)
+                    if ($using:ScheduleRollover)
                     {
                         try
                         {
-                            $SetLogSettings = Set-WebConfigurationProperty -PSPath 'MACHINE/WEBROOT/APPHOST' -Filter $filter -Name 'period' -Value 'Daily' -ErrorAction Stop
-                            $Result["${Prefix}RolloverMethod"] = "Daily"
+                            $SetLogSettings = Set-WebConfigurationProperty -PSPath 'MACHINE/WEBROOT/APPHOST' -Filter $filter -Name 'period' -Value $using:Schedule -ErrorAction Stop
+                            $Result["${Prefix}RolloverMethod"] = $using:Schedule
                         }
                         catch
                         {
                             $Result["${Prefix}RolloverMethod"] = "Failure"
                         }
                     }
-                    elseif ($using:MaxSize)
+                    elseif ($using:MaxSizeRollover)
                     {
                         try
                         {
@@ -290,11 +312,11 @@ if ($Set -and $Results)
                         }
                     }
                 }
-                if ($using:UTF8)
+                if ($using:Encoding -eq 'UTF8')
                 {
                     try
                     {
-                        $SetEncoding = Set-WebConfigurationProperty -PSPath 'MACHINE/WEBROOT/APPHOST' -Filter 'system.applicationHost/log' -Name 'logInUTF8' -Value $true
+                        $SetEncoding = Set-WebConfigurationProperty -PSPath 'MACHINE/WEBROOT/APPHOST' -Filter 'system.applicationHost/log' -Name 'logInUTF8' -Value $true -ErrorAction Stop
                         $Result["Encoding"] = "UTF-8"
                     }
                     catch
@@ -306,14 +328,14 @@ if ($Set -and $Results)
                 {
                     try
                     {
-                        $SetEncoding = Set-WebConfigurationProperty -PSPath 'MACHINE/WEBROOT/APPHOST' -Filter 'system.applicationHost/log' -Name 'logInUTF8' -Value $false
+                        $SetEncoding = Set-WebConfigurationProperty -PSPath 'MACHINE/WEBROOT/APPHOST' -Filter 'system.applicationHost/log' -Name 'logInUTF8' -Value $false -ErrorAction Stop
                         $Result["Encoding"] = "ANSI"
                     }
                     catch
                     {
                         $Result["Encoding"] = "Failure"
                     }
-                }
+                }    
                 [PSCustomObject]$Result
                                 
             }
@@ -341,10 +363,11 @@ if ($Set -and $Results)
         Write-Host "IIS logging configuration of the following server(s) was changed:" -ForegroundColor Yellow
         #$SetResults | Format-Table -Property @{n="Server";e={$_.Server};Alignment='Left'},@{n="RootDirectory";e={$_.RootDirectory};Alignment='Left'},@{n="RootRollOverMethod";e={$_.RootRollOverMethod};Alignment='Left'},@{n="RootRollOverSize";e={$_.RootRollOverSize};Alignment='Left'},@{n="DefaultWebSiteDirectory";e={$_.DefaultWebSiteDirectory};Alignment='Left'},@{n="DefaultWebSiteRollOverMethod";e={$_.DefaultWebSiteRollOverMethod};Alignment='Left'},@{n="DefaultWebSiteRollOverSize";e={$_.DefaultWebSiteRollOverSize};Alignment='Left'},@{n="ExchangeBackEndDirectory";e={$_.ExchangeBackEndDirectory};Alignment='Left' },@{n="ExchangeBackEndRollOverMethod";e={$_.ExchangeBackEndRollOverMethod};Alignment='Left'},@{n="ExchangeBackEndRollOverSize";e={$_.ExchangeBackEndRollOverSize};Alignment='Left'},@{n="Encoding";e={$_.Encoding};Alignment='Left'} -AutoSize
         $SetResults | Format-Table -Property @{n="Server";e={$_.Server};Alignment='Left'},@{n="DefaultWebSiteDirectory";e={$_.DefaultWebSiteDirectory};Alignment='Left'},@{n="DefaultWebSiteRollOverMethod";e={$_.DefaultWebSiteRollOverMethod};Alignment='Left'},@{n="DefaultWebSiteRollOverSize";e={$_.DefaultWebSiteRollOverSize};Alignment='Left'},@{n="ExchangeBackEndDirectory";e={$_.ExchangeBackEndDirectory};Alignment='Left' },@{n="ExchangeBackEndRollOverMethod";e={$_.ExchangeBackEndRollOverMethod};Alignment='Left'},@{n="ExchangeBackEndRollOverSize";e={$_.ExchangeBackEndRollOverSize};Alignment='Left'},@{n="Encoding";e={$_.Encoding};Alignment='Left'} -AutoSize
-        $SetResults | Export-Csv -Path "$($ScriptPath)\iis_logsettings_changes.csv" -Delimiter ";" -NoTypeInformation -Encoding UTF8
+
+        $SetResults | Export-Csv -Path "$($ScriptPath)\iis_logsettings_changes_$($now.tostring("yyyy_MM_dd-HH_mm_ss")).csv" -Delimiter ";" -NoTypeInformation -Encoding UTF8
     }
     else
     {
-        Write-Host "We made no change." -ForegroundColor Green
+        Write-Host "`nNotice: We made no changes." -ForegroundColor Green
     }
 }

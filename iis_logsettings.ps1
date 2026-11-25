@@ -92,7 +92,7 @@ $ScriptPath = $PSScriptRoot
 #Check if Exchange SnapIn is available and load it
 $SnapIn = "Microsoft.Exchange.Management.PowerShell.SnapIn"
 
-if (!(Get-PSSnapin -Name $SnapIn -ErrorAction SilentlyContinue))
+if (!(Get-PSSession | Where-Object ConfigurationName -contains "Microsoft.Exchange"))
 {
     if (Get-PSSnapin -Name $SnapIn -Registered -ErrorAction SilentlyContinue)
     {
